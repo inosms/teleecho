@@ -1,0 +1,17 @@
+[package]
+name = "teleecho"
+version = "0.1.0"
+authors = ["inosms <kurisumasupurezento@gmail.com>"]
+description = "A small command to redirect output via a Telegram bot to your Telegram account."
+repository = "https://github.com/inosms/teleecho"
+readme = "Readme.md"
+keywords = ["telegram","pipe","forward","redirect","output"]
+license = "MIT"
+
+[dependencies]
+telegram-bot =  {path = "telegram-bot" }
+clap = "*"
+time = "*"
+rand = "0.3"
+serde = "*"
+serde_json = "*"
