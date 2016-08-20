@@ -9,11 +9,11 @@ keywords = ["telegram","pipe","forward","redirect","output"]
 license = "MIT"
 
 [dependencies]
-clap = "*"
-time = "*"
+clap = "2.10"
+time = "0.1"
 rand = "0.3"
-serde = "*"
-serde_json = "*"
+serde = "0.8"
+serde_json = "0.8"
 telegram-bot = "0.4.2"
 
 
