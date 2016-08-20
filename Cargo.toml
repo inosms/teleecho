@@ -9,9 +9,13 @@ keywords = ["telegram","pipe","forward","redirect","output"]
 license = "MIT"
 
 [dependencies]
-telegram-bot =  {path = "telegram-bot" }
 clap = "*"
 time = "*"
 rand = "0.3"
 serde = "*"
 serde_json = "*"
+telegram-bot = "0.4.2"
+
+
+[replace]
+"telegram-bot:0.4.2" = {path = 'telegram-bot' } 
