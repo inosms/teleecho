@@ -14,6 +14,7 @@ pub enum Error {
     ConfigEntryExists,
     ConfigConnectionNotExist,
     ConfigNotUniqueConnection,
+    HomePathNotFound,
 }
 
 
@@ -30,6 +31,7 @@ impl ::std::error::Error for Error {
                 "empty connection name can only be specified, when exactly one connecition is \
                  registered"
             }
+            Error::HomePathNotFound => "unable to retreive home path",
         }
     }
 }
@@ -47,6 +49,7 @@ impl fmt::Display for Error {
                  registered"
                     .fmt(f)
             }
+            Error::HomePathNotFound => "unable to retreive home path".fmt(f),
         }
     }
 }
