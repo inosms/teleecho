@@ -4,6 +4,8 @@
 
 a small command to redirect output via a Telegram bot to your Telegram account.
 
+Note that this is not finished yet, so use with caution.
+
 ![](https://dl.dropboxusercontent.com/u/36945131/out.gif)
 
 

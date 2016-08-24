@@ -1,3 +1,4 @@
+#![feature(io)]
 #![recursion_limit = "1024"]
 #[macro_use]
 extern crate error_chain;
@@ -45,23 +46,9 @@ fn process_input(telelog_bot: &mut TeleechoProcessor) {
     use std::io;
     use std::io::Read;
 
-    let mut input = [0; 400];
-
-    loop {
-        let mut end_reached = false;
-
-        print_err!(|| -> Result<()> {
-            let chars_read = try!(io::stdin().read(&mut input));
-            let converted_utf8 = try!(std::str::from_utf8(&input[..chars_read]));
-            telelog_bot.append_to_input_buffer(&converted_utf8);
-
-            end_reached = chars_read == 0;
-            Ok(())
-        }());
-
-        if end_reached {
-            break;
-        }
+    for elem in io::stdin().chars() {
+        let c = elem.unwrap_or(' ');
+        telelog_bot.append_to_input_buffer(c);
     }
 }
 
@@ -72,7 +59,7 @@ fn create_clap_app<'a, 'b>() -> clap::ArgMatches<'a>
     App::new("teleecho")
         .setting(AppSettings::VersionlessSubcommands)
         .setting(AppSettings::ColoredHelp)
-        .version("0.0.1")
+        .version("0.1.0")
         .about("forwards input via telegram to user")
         .arg(Arg::with_name("connection")
                  .value_name("CONNECTION NAME")

@@ -230,6 +230,9 @@ pub struct TeleechoProcessor {
     /// raw input from the pipe
     input_buffer: String,
 
+    /// keep account of how long the input buffer is
+    input_buffer_size: usize,
+
     sender: Sender<BufferChangeEvent>,
 
     /// a buffer that stores the messages to be sent
@@ -246,7 +249,8 @@ impl TeleechoProcessor {
         let (sender, handle, buffer) = TeleechoSender::create(api, user_id);
 
         Ok(TeleechoProcessor {
-            input_buffer: String::new(),
+            input_buffer: String::with_capacity(8000),
+            input_buffer_size: 0,
             sender: sender,
             message_buffer: buffer.clone(),
             handle: Some(handle),
@@ -294,58 +298,60 @@ impl TeleechoProcessor {
     }
 
     /// appends the given string to the input buffer
-    pub fn append_to_input_buffer(&mut self, s: &str) {
-        // append the input the the buffer
-        self.input_buffer.push_str(s);
+    pub fn append_to_input_buffer(&mut self, c: char) {
 
-        // split the buffer at '\r', '\n' or 4096 chars
-        self.split_input();
+        if c == '\n' || c == '\r' {
+            self.convert_to_message();
+        }
+
+        // add all chars, even '\r' but not '\n' as this
+        // triggers flush
+        // '\r' is needed to know whether one has to override
+        // the last message
+        if c != '\n' {
+            self.input_buffer.push(c);
+            self.input_buffer_size += 1;
+        }
+
+        // if after adding the buffer is too big, flush
+        if self.input_buffer_size >= 4096 {
+            self.convert_to_message();
+        }
     }
 
-    /// splits the buffer at '\r', '\n' or 4096 chars
-    /// then appends the parts to the send buffer
-    fn split_input(&mut self) {
+    /// call this when '\r', '\n' or 4096 chars are reached
+    /// this then converts this to a message
+    /// and appends this to the input buffer
+    fn convert_to_message(&mut self) {
 
-        let mut result_buffer = vec![];
-        {
-            let mut i = 0;
-            let mut starts_with_r = false;
+        // this will hold the message text
+        let mut message_text = String::with_capacity(self.input_buffer.len());
 
-            let mut buffer = String::with_capacity(::std::cmp::min(self.input_buffer.len(), 4096));
-
-            for c in self.input_buffer.chars() {
-
-                if i == 0 && c == '\r' {
-                    starts_with_r = true;
-                    buffer.push(c);
-                } else if c == '\r' || c == '\n' || i >= 4096 {
-                    if starts_with_r {
-                        result_buffer.push(MessageBuffer::CarriageReturn(buffer.replace("\r", "")));
-                    } else {
-                        result_buffer.push(MessageBuffer::Newline(buffer));
-                    }
-
-                    buffer = String::with_capacity(::std::cmp::min(self.input_buffer.len(), 4096));
-                    i = -1;
-                    starts_with_r = false;
-
-                    if c == '\r' {
-                        starts_with_r = true;
-                        buffer.push(c);
-                    }
-                } else {
-                    buffer.push(c);
-                }
-
-                i += 1;
+        // try to find out if there is a carriage return in the message
+        // if it is, then it means the carriage return must be the first
+        // character
+        let mut is_carriage_return = false;
+        for ch in self.input_buffer.chars() {
+            if ch == '\r' {
+                is_carriage_return = true;
+            } else {
+                message_text.push(ch);
             }
-
-            self.input_buffer = buffer;
         }
 
-        for r in result_buffer {
-            self.append_to_send_buffer(r);
-        }
+        // compose the message
+        let message = if is_carriage_return {
+            MessageBuffer::CarriageReturn(message_text)
+        } else {
+            MessageBuffer::Newline(message_text)
+        };
+
+        // send
+        self.append_to_send_buffer(message);
+
+        // clear buffer and size
+        self.input_buffer.clear();
+        self.input_buffer_size = 0;
     }
 }
 
