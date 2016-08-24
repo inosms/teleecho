@@ -1,5 +1,7 @@
 # teleecho
 
+[![Build Status](https://travis-ci.org/inosms/teleecho.svg?branch=master)](https://travis-ci.org/inosms/teleecho)
+
 a small command to redirect output via a Telegram bot to your Telegram account.
 
 ![](https://dl.dropboxusercontent.com/u/36945131/out.gif)

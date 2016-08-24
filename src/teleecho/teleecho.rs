@@ -19,6 +19,8 @@ enum MessageBuffer {
     Newline(String),
 }
 
+/// These are sent from the TeleechoProcessor to the sender to signal
+/// if a new element was added to the queue or the processor has ended
 #[derive(Debug)]
 enum BufferChangeEvent {
     NewElement,
@@ -36,8 +38,10 @@ struct TeleechoSender {
     /// a buffer that stores the messages to be sent
     message_buffer: Arc<Mutex<Vec<MessageBuffer>>>,
 
+    /// time in ns when the last message was sent
     last_send_time: u64,
 
+    /// the id to send the messages to
     user_id: i64,
 }
 
@@ -249,16 +253,23 @@ impl TeleechoProcessor {
         })
     }
 
+    /// if the send thread is still running this sends the kill signal 
+    /// and waits for the thread to finish up
+    /// if was already closed, nothing will be done
     pub fn close(&mut self) {
         match self.handle.take() {
             Some(handle) => {
                 self.sender.send(BufferChangeEvent::Kill).unwrap();
                 handle.join().unwrap();
             }
-            None => return,
+            None => {}
         }
     }
 
+    /// given a MessageBuffer event this appends the message
+    /// into the buffer. 
+    /// if CarriageReturn and another message present this
+    /// message is overriden
     fn append_to_send_buffer(&mut self, msg: MessageBuffer) {
 
         let mut msg_buffer = self.message_buffer.lock().unwrap();
@@ -338,18 +349,25 @@ impl TeleechoProcessor {
     }
 }
 
+// implement drop for the processor to
+// prevent forgetting to call close
 impl Drop for TeleechoProcessor {
     fn drop(&mut self) {
         self.close();
     }
 }
 
-
+/// given a token this starts a listener for telegram messages.
+/// if the randomly generated pairing number is send via telegram
+/// to this bot a new connection pair is returned
+/// if something goes wrong an Error is returned
 pub fn register_connection(token: &str) -> Result<(String, i64)> {
 
     let api = try!(telegram_bot::Api::from_token(&token));
     let me = try!(api.get_me());
 
+    // generate a random number to be used for pairing
+    // its probably possible to just use the "/start" command
     let mut rng = rand::thread_rng();
     let random_number = rng.gen_range(0, 99999);
 
@@ -357,10 +375,11 @@ pub fn register_connection(token: &str) -> Result<(String, i64)> {
              me.username.unwrap(),
              random_number);
 
-    let mut listener = api.listener(telegram_bot::ListeningMethod::LongPoll(None));
-
+    // this will hold the user id to send the messages to
     let mut user_id = None;
 
+    // create the listener and listen what the user has to say
+    let mut listener = api.listener(telegram_bot::ListeningMethod::LongPoll(None));
     try!(listener.listen(|u| {
         // If the received update contains a message...
         if let Some(m) = u.message {
@@ -369,9 +388,12 @@ pub fn register_connection(token: &str) -> Result<(String, i64)> {
             // Match message type
             match m.msg {
                 telegram_bot::MessageType::Text(t) => {
-                    // Print received text message to stdout
 
+                    // if the corret number was specified
                     if t == format!("{}", random_number) {
+
+                        // notify the user
+                        // but dont panic if this did not work
                         match api.send_message(m.chat.id(),
                                                String::from("correct number!"),
                                                None,
@@ -397,6 +419,7 @@ pub fn register_connection(token: &str) -> Result<(String, i64)> {
         Ok(telegram_bot::ListeningAction::Continue)
     }));
 
+    // the user id must have been found, otherwise the connection is not complete
     if user_id.is_none() {
         Err("user id is empty".into())
     } else {
