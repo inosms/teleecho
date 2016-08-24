@@ -4,14 +4,18 @@
 
 a small command to redirect output via a Telegram bot to your Telegram account.
 
-Note that this is not finished yet, so use with caution.
-
 ![](https://dl.dropboxusercontent.com/u/36945131/out.gif)
+
+
+### Note
+This is not finished yet, so use with caution.
+
+As `std::io::Read::chars()` is unstable this requires nightly until this gets stable.
 
 
 ## Installation
 
-1. Install Rust
+1. install nightly rust compiler
 2. clone this repository
 3. ```cd teleecho``` 
 4. ```cargo install teleecho```
