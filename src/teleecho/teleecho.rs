@@ -203,10 +203,10 @@ impl TeleechoSender {
                     let final_message = parts.join("\n");
 
                     // and go
-                    match self.api.edit_message_text(m.chat.id(),
-                                                     m.message_id,
-                                                     final_message,
+                    match self.api.edit_message_text(Some(m.chat.id()),
+                                                     Some(m.message_id),
                                                      None,
+                                                     final_message,
                                                      None,
                                                      None,
                                                      None) {
