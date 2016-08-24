@@ -15,7 +15,7 @@ rand = "0.3"
 serde = "0.8"
 serde_json = "0.8"
 telegram-bot = "0.4.2"
-
+error-chain = "0.4"
 
 [replace]
 "telegram-bot:0.4.2" = {path = 'telegram-bot' } 

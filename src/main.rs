@@ -1,11 +1,14 @@
+#![recursion_limit = "1024"]
+#[macro_use]
+extern crate error_chain;
 extern crate clap;
 extern crate rand;
 
 use clap::{Arg, App, SubCommand, AppSettings};
 mod teleecho;
+use teleecho::error::*;
 use teleecho::teleecho::TeleechoProcessor;
 use teleecho::config::Config;
-use teleecho::error::Error;
 use std::fs::OpenOptions;
 
 macro_rules! unwrap_or_return {
@@ -29,6 +32,14 @@ macro_rules! unwrap_or_return {
     )
 }
 
+macro_rules! print_err {
+    ($expr:expr) => (
+        match $expr {
+            Ok(_) => {},
+            Err(e) => println!("error: {}",e)
+        }
+    )
+}
 
 fn process_input(telelog_bot: &mut TeleechoProcessor) {
     use std::io;
@@ -37,21 +48,19 @@ fn process_input(telelog_bot: &mut TeleechoProcessor) {
     let mut input = [0; 400];
 
     loop {
-        match io::stdin().read(&mut input) {
-            Ok(n) => {
-                match std::str::from_utf8(&input[..n]) {
-                    Ok(r) => {
-                        telelog_bot.append_to_input_buffer(&r);
+        let mut end_reached = false;
 
-                        // if nothing is read anymore; it has ended
-                        if n == 0 {
-                            break;
-                        }
-                    }
-                    Err(err) => println!("Error while decoding into string [{}]", err),
-                }
-            }
-            Err(error) => println!("error: {}", error),
+        print_err!(|| -> Result<()> {
+            let chars_read = try!(io::stdin().read(&mut input));
+            let converted_utf8 = try!(std::str::from_utf8(&input[..chars_read]));
+            telelog_bot.append_to_input_buffer(&converted_utf8);
+
+            end_reached = chars_read == 0;
+            Ok(())
+        }());
+
+        if end_reached {
+            break;
         }
     }
 }
@@ -100,6 +109,42 @@ fn create_clap_app<'a, 'b>() -> clap::ArgMatches<'a>
         .get_matches()
 }
 
+fn subcommand_remove(matches: &clap::ArgMatches,
+                     mut config: &mut Config,
+                     mut f: &mut std::fs::File)
+                     -> Result<()> {
+    let to_remove = matches.value_of("name").unwrap();
+
+    try!(config.remove(&to_remove));
+    try!(config.save_to(&mut f));
+
+    Ok(())
+}
+
+fn subcommand_new(matches: &clap::ArgMatches,
+                  mut config: &mut Config,
+                  mut f: &mut std::fs::File)
+                  -> Result<()> {
+    // is required, thus must be Some(...)
+    let token = matches.value_of("token").unwrap();
+    let name = matches.value_of("name").unwrap();
+
+    // do not allow whitespace in connection name
+    let name_without_whitespace = name.split_whitespace().collect::<Vec<&str>>().join("-");
+
+    match config.get(Some(&name_without_whitespace)) {
+        Ok(_) => return Err("name already taken!".into()),
+        Err(_) => {}
+    }
+
+    let (token, id) = try!(teleecho::teleecho::register_connection(token));
+    try!(config.add_entry(name_without_whitespace.clone(), token, id));
+    try!(config.save_to(&mut f));
+
+    println!("new connection successfully created: {}",
+             name_without_whitespace);
+    Ok(())
+}
 
 fn main() {
     let matches = create_clap_app();
@@ -108,10 +153,16 @@ fn main() {
     let config_file: std::path::PathBuf = match matches.value_of("config") {
         Some(t) => std::path::PathBuf::from(t),
         None => {
-            let mut path = unwrap_or_return!(std::env::home_dir().ok_or(Error::HomePathNotFound),
-                                             "while getting home directory");
-            path.push(".teleecho.conf");
-            path
+            match std::env::home_dir() {
+                Some(mut path) => {
+                    path.push(".teleecho.conf");
+                    path
+                }
+                None => {
+                    println!("error while retrieving home directory");
+                    return;
+                }
+            }
         }
     };
 
@@ -132,33 +183,7 @@ fn main() {
 
     // handle the new subcommand
     if let Some(matches) = matches.subcommand_matches("new") {
-        // is required, thus must be Some(...)
-        let token = matches.value_of("token").unwrap();
-        let name = matches.value_of("name").unwrap();
-
-        // do not allow whitespace in connection name
-        let name_without_whitespace = name.split_whitespace().collect::<Vec<&str>>().join("-");
-
-        match config.get(Some(&name_without_whitespace)) {
-            Ok(_) => {
-                println!("name already taken!");
-                return;
-            }
-            Err(_) => {}
-        }
-
-        match teleecho::teleecho::register_connection(token) {
-            Some((token, id)) => {
-                unwrap_or_return!(config.add_entry(name_without_whitespace.clone(), token, id),
-                                  "while adding entry");
-
-                unwrap_or_return!(config.save_to(&mut f), "while saving configuration");
-
-                println!("new connection successfully created: {}",
-                         name_without_whitespace);
-            }
-            None => {}
-        }
+        print_err!(subcommand_new(&matches, &mut config, &mut f));
     }
     // handle the list subcommand
     else if let Some(_) = matches.subcommand_matches("list") {
@@ -166,10 +191,7 @@ fn main() {
     }
     // handle the remove subcommand
     else if let Some(matches) = matches.subcommand_matches("remove") {
-        let to_remove = matches.value_of("name").unwrap();
-
-        unwrap_or_return!(config.remove(&to_remove), "while removing connection");
-        unwrap_or_return!(config.save_to(&mut f), "while saving configuration");
+        print_err!(subcommand_remove(&matches, &mut config, &mut f));
     }
     // if no subcommand was specified, start sending
     else {

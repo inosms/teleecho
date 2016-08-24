@@ -17,18 +17,19 @@ impl Config {
 
         try!(file.read_to_string(&mut content));
 
+        // if file was created, there is nothing to read, so create an empty config object
         if content.len() == 0 {
-            return Ok(Config { entries: vec![] });
+            Ok(Config { entries: vec![] })
         }
-
-        let entries: Vec<(String, String, i64)> = try!(serde_json::from_str(&content));
-
-        Ok(Config { entries: entries })
+        // otherwise try to parse the file content into a configuration
+        else {
+            Ok(Config { entries: try!(serde_json::from_str(&content)) })
+        }
     }
 
     /// converts the config object into a string, that can be written to a file
-    fn to_string(&self) -> String {
-        serde_json::to_string(&self.entries).unwrap()
+    fn to_string(&self) -> Result<String> {
+        Ok(try!(serde_json::to_string(&self.entries)))
     }
 
     /// given a name, bot token and user id this tries to store this in the internal
@@ -37,7 +38,7 @@ impl Config {
     pub fn add_entry(&mut self, name: String, token: String, user_id: i64) -> Result<()> {
         for &(ref n, _, _) in &self.entries {
             if n == &name {
-                return Err(Error::ConfigEntryExists);
+                return Err("config entry already exists".into());
             }
         }
 
@@ -51,7 +52,7 @@ impl Config {
         // get to the first position of the file to override everything
         try!(file.seek(::std::io::SeekFrom::Start(0)));
 
-        let to_write = self.to_string();
+        let to_write = try!(self.to_string());
         let to_write_bytes = to_write.as_bytes();
 
         // write the config to file
@@ -78,14 +79,17 @@ impl Config {
                         return Ok((t.clone(), i.clone()));
                     }
                 }
-                Err(Error::ConfigConnectionNotExist)
+                Err(ErrorKind::ConfigConnectionNotExist.into())
             }
             None => {
                 if self.entries.len() == 1 {
                     let (_, ref t, ref i) = self.entries[0];
                     Ok((t.clone(), i.clone()))
                 } else {
-                    Err(Error::ConfigNotUniqueConnection)
+                    Err(format!("as no connection was given, the default would be used, but \
+                                 there does not exist one, but {} connections to choose from",
+                                self.entries.len())
+                            .into())
                 }
             }
         }
@@ -118,7 +122,7 @@ impl Config {
             self.entries.remove(to_remove_index.unwrap());
             Ok(())
         } else {
-            Err(Error::ConfigConnectionNotExist)
+            Err(ErrorKind::ConfigConnectionNotExist.into())
         }
     }
 }

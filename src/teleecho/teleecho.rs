@@ -3,7 +3,7 @@ extern crate time;
 extern crate rand;
 
 use rand::Rng;
-use self::telegram_bot::*;
+use teleecho::error::*;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
@@ -28,10 +28,10 @@ enum BufferChangeEvent {
 struct TeleechoSender {
     /// the last sent message object,
     /// this is needed to be able to edit the last message
-    last_sent_message: Option<Message>,
+    last_sent_message: Option<telegram_bot::Message>,
 
     /// reference to the api
-    api: Api,
+    api: telegram_bot::Api,
 
     /// a buffer that stores the messages to be sent
     message_buffer: Arc<Mutex<Vec<MessageBuffer>>>,
@@ -42,7 +42,7 @@ struct TeleechoSender {
 }
 
 impl TeleechoSender {
-    fn create(api: Api,
+    fn create(api: telegram_bot::Api,
               user_id: i64)
               -> (Sender<BufferChangeEvent>,
                   JoinHandle<()>,
@@ -236,19 +236,17 @@ pub struct TeleechoProcessor {
 
 impl TeleechoProcessor {
     pub fn create(token: &str, user_id: i64) -> Result<TeleechoProcessor> {
-        match Api::from_token(&token) {
-            Ok(api) => {
-                let (sender, handle, buffer) = TeleechoSender::create(api, user_id);
 
-                Ok(TeleechoProcessor {
-                    input_buffer: String::new(),
-                    sender: sender,
-                    message_buffer: buffer.clone(),
-                    handle: Some(handle),
-                })
-            }
-            Err(e) => Err(e),
-        }
+        let api = try!(telegram_bot::Api::from_token(&token));
+
+        let (sender, handle, buffer) = TeleechoSender::create(api, user_id);
+
+        Ok(TeleechoProcessor {
+            input_buffer: String::new(),
+            sender: sender,
+            message_buffer: buffer.clone(),
+            handle: Some(handle),
+        })
     }
 
     pub fn close(&mut self) {
@@ -347,77 +345,61 @@ impl Drop for TeleechoProcessor {
 }
 
 
-pub fn register_connection(token: &str) -> Option<(String, i64)> {
+pub fn register_connection(token: &str) -> Result<(String, i64)> {
 
-    match Api::from_token(&token) {
-        Ok(api) => {
+    let api = try!(telegram_bot::Api::from_token(&token));
+    let me = try!(api.get_me());
 
-            if api.get_me().is_err() {
-                println!("invalid token");;
-                return None;
-            }
+    let mut rng = rand::thread_rng();
+    let random_number = rng.gen_range(0, 99999);
 
-            let mut rng = rand::thread_rng();
-            let random_number = rng.gen_range(0, 99999);
+    println!("send the following number to the {} bot:\t{}",
+             me.username.unwrap(),
+             random_number);
 
-            println!("send the following number to the {} bot:\t{}",
-                     api.get_me().unwrap().username.unwrap(),
-                     random_number);
+    let mut listener = api.listener(telegram_bot::ListeningMethod::LongPoll(None));
 
-            let mut listener = api.listener(ListeningMethod::LongPoll(None));
+    let mut user_id = None;
 
-            let mut user_id = None;
+    try!(listener.listen(|u| {
+        // If the received update contains a message...
+        if let Some(m) = u.message {
+            let name = m.from.first_name;
 
-            let res = listener.listen(|u| {
-                // If the received update contains a message...
-                if let Some(m) = u.message {
-                    let name = m.from.first_name;
+            // Match message type
+            match m.msg {
+                telegram_bot::MessageType::Text(t) => {
+                    // Print received text message to stdout
 
-                    // Match message type
-                    match m.msg {
-                        MessageType::Text(t) => {
-                            // Print received text message to stdout
+                    if t == format!("{}", random_number) {
+                        match api.send_message(m.chat.id(),
+                                               String::from("correct number!"),
+                                               None,
+                                               None,
+                                               None,
+                                               None) {
+                            Ok(_) => {}
+                            Err(err) => println!("Error while register {}", err),
+                        };
 
-                            if t == format!("{}", random_number) {
-                                match api.send_message(m.chat.id(),
-                                                       String::from("correct number!"),
-                                                       None,
-                                                       None,
-                                                       None,
-                                                       None) {
-                                    Ok(_) => {}
-                                    Err(err) => println!("Error while register {}", err),
-                                };
+                        user_id = Some(m.chat.id());
+                        return Ok(telegram_bot::ListeningAction::Stop);
 
-                                user_id = Some(m.chat.id());
-                                return Ok(ListeningAction::Stop);
-
-                            } else {
-                                println!("received wrong number from {}", name);
-                            }
-                        }
-                        _ => {}
+                    } else {
+                        println!("received wrong number from {}", name);
                     }
                 }
-
-                // If none of the "try!" statements returned an error: It's Ok!
-                Ok(ListeningAction::Continue)
-            });
-            if let Err(e) = res {
-                println!("An error occured: {}", e);
-            }
-
-            if user_id.is_none() {
-                None
-            } else {
-                Some((String::from(token), user_id.unwrap()))
+                _ => {}
             }
         }
-        Err(e) => {
-            println!("Error while connecting {}", e);
-            None
-        }
+
+        // If none of the "try!" statements returned an error: It's Ok!
+        Ok(telegram_bot::ListeningAction::Continue)
+    }));
+
+    if user_id.is_none() {
+        Err("user id is empty".into())
+    } else {
+        Ok((String::from(token), user_id.unwrap()))
     }
-
-
 }
