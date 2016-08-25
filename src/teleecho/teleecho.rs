@@ -9,6 +9,7 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
+use std::collections::vec_deque::VecDeque;
 
 #[derive(Debug)]
 enum MessageBuffer {
@@ -36,7 +37,7 @@ struct TeleechoSender {
     api: telegram_bot::Api,
 
     /// a buffer that stores the messages to be sent
-    message_buffer: Arc<Mutex<Vec<MessageBuffer>>>,
+    message_buffer: Arc<Mutex<VecDeque<MessageBuffer>>>,
 
     /// time in ns when the last message was sent
     last_send_time: u64,
@@ -50,13 +51,13 @@ impl TeleechoSender {
               user_id: i64)
               -> (Sender<BufferChangeEvent>,
                   JoinHandle<()>,
-                  Arc<Mutex<Vec<MessageBuffer>>>) {
+                  Arc<Mutex<VecDeque<MessageBuffer>>>) {
 
         // create the sender object
         let ts = TeleechoSender {
             last_sent_message: None,
             api: api,
-            message_buffer: Arc::new(Mutex::new(vec![])),
+            message_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(4096))),
             last_send_time: 0,
             user_id: user_id,
         };
@@ -90,9 +91,8 @@ impl TeleechoSender {
 
                     // send only every second
                     if time_diff <= 1000000000u64 && ts.last_send_time != 0 {
-                        thread::sleep(::std::time::Duration::from_millis((1000000000u64 -
-                                                                          time_diff) /
-                                                                         1000000u64));
+                        thread::sleep(::std::time::Duration::new(0,(1000000000u64 -
+                                                                          time_diff) as u32));
                     }
 
                     // if a new message event is received this does not mean, that
@@ -102,32 +102,33 @@ impl TeleechoSender {
 
                         let to_send = TeleechoSender::combine_messages(&mut ts.message_buffer);
 
-                        ts.last_send_time = time::precise_time_ns();
-
-
                         match to_send {
                             MessageBuffer::Newline(msg) => ts.send(msg),
                             MessageBuffer::CarriageReturn(msg) => ts.override_last(msg),
                         }
 
-                        println!("took {} ms",
-                                 (time::precise_time_ns() - ts.last_send_time) / 1000_000u64);
+                        // telegram seems to store the end of the request as time
+                        // if timed before sending one gets a lot of timeouts
+                        ts.last_send_time = time::precise_time_ns();
                     }
                 }
             }
         }
     }
 
-    fn combine_messages(message_buffer: &mut Arc<Mutex<Vec<MessageBuffer>>>) -> MessageBuffer {
-        let to_send = message_buffer.lock().unwrap().remove(0);
+    fn combine_messages(message_buffer: &mut Arc<Mutex<VecDeque<MessageBuffer>>>) -> MessageBuffer {
+
+        let mut message_buffer = message_buffer.lock().unwrap();
+        let to_send = message_buffer.pop_front().unwrap();
 
         match to_send {
             MessageBuffer::Newline(msg) => {
                 let mut message = msg;
-                while message_buffer.lock().unwrap().len() > 0 {
+                let mut message_length = message.chars().count();
+                while message_buffer.len() > 0 {
 
                     let new_pop = {
-                        message_buffer.lock().unwrap().remove(0)
+                        message_buffer.pop_front().unwrap()
                     };
 
                     if let MessageBuffer::Newline(msg) = new_pop {
@@ -135,14 +136,16 @@ impl TeleechoSender {
                         // as the limit is at 4096 utf8 chars defined by
                         // the telegram api and not 4096 bytes which would be
                         // String.len() >= 4096
-                        if msg.chars().count() + message.chars().count() >= 4096 {
-                            message_buffer.lock()
-                                          .unwrap()
-                                          .insert(0, MessageBuffer::Newline(msg));
+
+                        let this_message_length = msg.chars().count();
+
+                        if this_message_length + message_length + 1 >= 4096 {
+                            message_buffer.push_front(MessageBuffer::Newline(msg));
                             break;
                         } else {
                             message.push('\n');
                             message.push_str(&msg);
+                            message_length += this_message_length + 1;
                         }
                     }
                 }
@@ -157,9 +160,6 @@ impl TeleechoSender {
     // sends the given string if the message is longer than 0
     // if successfully sent, this returns a message id
     fn send(&mut self, s: String) {
-
-        println!("b {}\tutf {}", s.len(), s.chars().count());
-
         if s.len() > 0 {
             match self.api.send_message(self.user_id, s, None, None, None, None) {
                 Ok(o) => self.last_sent_message = Some(o),
@@ -246,7 +246,7 @@ pub struct TeleechoProcessor {
     sender: Sender<BufferChangeEvent>,
 
     /// a buffer that stores the messages to be sent
-    message_buffer: Arc<Mutex<Vec<MessageBuffer>>>,
+    message_buffer: Arc<Mutex<VecDeque<MessageBuffer>>>,
 
     handle: Option<JoinHandle<()>>,
 }
@@ -289,19 +289,19 @@ impl TeleechoProcessor {
         let mut msg_buffer = self.message_buffer.lock().unwrap();
 
         if msg_buffer.len() == 0 {
-            msg_buffer.push(msg);
+            msg_buffer.push_back(msg);
         } else if let &MessageBuffer::Newline(_) = &msg {
-            msg_buffer.push(msg);
+            msg_buffer.push_back(msg);
         } else if let MessageBuffer::CarriageReturn(s) = msg {
             // get last element; will exist, as len() > 0
-            let last_elem = msg_buffer.pop().unwrap();
+            let last_elem = msg_buffer.pop_back().unwrap();
 
             let new_elem = match last_elem {
                 MessageBuffer::CarriageReturn(_) => MessageBuffer::CarriageReturn(s),
                 MessageBuffer::Newline(_) => MessageBuffer::Newline(s),
             };
 
-            msg_buffer.push(new_elem);
+            msg_buffer.push_back(new_elem);
         }
 
         self.sender.send(BufferChangeEvent::NewElement).unwrap();
