@@ -13,15 +13,6 @@ use teleecho::config::Config;
 use std::fs::OpenOptions;
 
 macro_rules! unwrap_or_return {
-    ($expr:expr) => (
-        match $expr {
-            Ok(r) => r,
-            Err(e) => {
-                println!("error: {}",e);
-                return
-            }
-        }
-    );
     ($expr:expr,$message:expr) => (
         match $expr {
             Ok(r) => r,
