@@ -104,10 +104,14 @@ impl TeleechoSender {
 
                         ts.last_send_time = time::precise_time_ns();
 
+
                         match to_send {
                             MessageBuffer::Newline(msg) => ts.send(msg),
                             MessageBuffer::CarriageReturn(msg) => ts.override_last(msg),
                         }
+
+                        println!("took {} ms",
+                                 (time::precise_time_ns() - ts.last_send_time) / 1000_000u64);
                     }
                 }
             }
@@ -127,7 +131,11 @@ impl TeleechoSender {
                     };
 
                     if let MessageBuffer::Newline(msg) = new_pop {
-                        if msg.len() + message.len() >= 4096 {
+                        // count the chars and not just String.len()
+                        // as the limit is at 4096 utf8 chars defined by
+                        // the telegram api and not 4096 bytes which would be
+                        // String.len() >= 4096
+                        if msg.chars().count() + message.chars().count() >= 4096 {
                             message_buffer.lock()
                                           .unwrap()
                                           .insert(0, MessageBuffer::Newline(msg));
@@ -149,6 +157,8 @@ impl TeleechoSender {
     // sends the given string if the message is longer than 0
     // if successfully sent, this returns a message id
     fn send(&mut self, s: String) {
+
+        println!("b {}\tutf {}", s.len(), s.chars().count());
 
         if s.len() > 0 {
             match self.api.send_message(self.user_id, s, None, None, None, None) {
